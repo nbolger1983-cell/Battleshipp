@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fleet Command: Naval Grid Strategy</title>
+    <!-- Standard Tailwind CSS via official CDN for clean, responsive academic UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styling for naval grid aesthetics and tactile feedback */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            user-select: none;
+        }
+
+        .font-mono-grid {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* 10x10 Coordinate Grid Layout */
+        .naval-grid {
+            display: grid;
+            grid-template-columns: 28px repeat(10, minmax(0, 1fr));
+            grid-template-rows: 28px repeat(10, minmax(0, 1fr));
+            gap: 2px;
+            background-color: #cbd5e1;
+            border: 2px solid #334155;
+            border-radius: 0.5rem;
+            padding: 4px;
+            aspect-ratio: 1 / 1;
+            width: 100%;
+            max-width: 440px;
+            margin: 0 auto;
+        }
+
+        .grid-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #475569;
+            background-color: #e2e8f0;
+            border-radius: 0.25rem;
+        }
+
+        .grid-cell {
+            position: relative;
+            background-color: #e0f2fe;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            transition: background-color 0.15s ease, transform 0.1s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .grid-cell:hover:not(.disabled-cell) {
+            background-color: #bae6fd;
+        }
+
+        /* Ship & Combat Cell States */
+        .cell-ship {
+            background-color: #475569 !important;
+            border: 1px solid #1e293b;
+        }
+
+        .cell-preview-valid {
+            background-color: #38bdf8 !important;
+            opacity: 0.85;
+        }
+
+        .cell-preview-invalid {
+            background-color: #f87171 !important;
+            opacity: 0.85;
+        }
+
+        .cell-miss {
+            background-color: #f8fafc !important;
+        }
+
+        .cell-miss::after {
+            content: '';
+            width: 35%;
+            height: 35%;
+            border-radius: 50%;
+            background-color: #94a3b8;
+        }
+
+        .cell-hit {
+            background-color: #fee2e2 !important;
+            border: 1px solid #ef4444;
+        }
+
+        .cell-hit::after {
+            content: '✕';
+            color: #dc2626;
+            font-weight: 800;
+            font-size: 1rem;
+            line-height: 1;
+        }
+
+        .cell-sunk {
+            background-color: #991b1b !important;
+            border: 1px solid #450a0a;
+        }
+
+        .cell-sunk::after {
+            content: '✕';
+            color: #fca5a5;
+            font-weight: 800;
+            font-size: 1rem;
+            line-height: 1;
+        }
+
+        .disabled-cell {
+            cursor: default;
+        }
+
+        /* Subtle pulse for active turn */
+        @keyframes pulse-border {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(14, 165, 233, 0); }
+        }
+        .active-turn-ring {
+            animation: pulse-border 2s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Top Navigation Header -->
+    <header class="bg-slate-900 text-white shadow-md border-b border-slate-700">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-3">
+                <!-- Simple inline SVG Anchor/Radar Emblem -->
+                <div class="bg-sky-600 p-2 rounded-lg shadow-inner">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="9" stroke-opacity="0.4"></circle>
+                        <circle cx="12" cy="12" r="5" stroke-opacity="0.7"></circle>
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v3m0 12v3M3 12h3m12 0h3m-9-9l4.5 4.5"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-lg sm:text-xl font-bold tracking-tight">Fleet Command</h1>
+                    <p class="text-xs text-slate-300">Naval Grid Strategy • Classroom Edition</p>
+                </div>
+            </div>
+
+            <!-- Player Status Badge (Visible after login) -->
+            <div id="user-header-info" class="hidden flex items-center gap-3">
+                <div class="text-right">
+                    <div class="text-xs text-slate-400">Logged in as</div>
+                    <div id="header-username" class="text-sm font-semibold text-sky-300">Cadet</div>
+                </div>
+                <button id="btn-change-name" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg border border-slate-600 transition">
+                    Change Name
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Non-intrusive Notification Banner / Toast -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+    <!-- Main Content Container -->
+    <main class="flex-grow max-w-6xl w-full mx-auto px-4 py-6">
+
+        <!-- VIEW 1: LOGIN & USERNAME REGISTRATION -->
+        <section id="view-login" class="max-w-md mx-auto mt-6 bg-white rounded-xl shadow-sm border border-slate-200 p-6 sm:p-8">
+            <div class="text-center mb-6">
+                <span class="inline-block px-3 py-1 bg-sky-100 text-sky-800 text-xs font-semibold rounded-full mb-2">
+                    Classroom Multiplayer Portal
+                </span>
+                <h2 class="text-2xl font-bold text-slate-900">Report for Duty</h2>
+                <p class="text-sm text-slate-600 mt-1">
+                    Choose a school-appropriate callsign to enter the live classroom lobby.
+                </p>
+            </div>
+
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label for="input-username" class="block text-sm font-medium text-slate-700 mb-1">
+                        Student Callsign (Username)
+                    </label>
+                    <input 
+                        type="text" 
+                        id="input-username" 
+                        maxlength="18" 
+                        placeholder="e.g., CaptainAlex or Admiral_Sam" 
+                        required
+                        autocomplete="off"
+                        class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none text-slate-900"
+                    >
+                    <p class="text-xs text-slate-500 mt-1">
+                        3–18 characters. Letters, numbers, spaces, and underscores only.
+                    </p>
+                </div>
+
+                <div id="login-error" class="hidden p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium"></div>
+
+                <button 
+                    type="submit" 
+                    id="btn-enter-lobby"
+                    class="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-semibold rounded-lg shadow-sm transition flex items-center justify-center gap-2"
+                >
+                    <span>Enter Classroom Lobby</span>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+                    </svg>
+                </button>
+            </form>
+
+            <div class="mt-6 pt-4 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
+                <span id="connection-status-text">Connecting to classroom server...</span>
+                <span id="connection-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+            </div>
+        </section>
+
+        <!-- VIEW 2: CLASSROOM LOBBY -->
+        <section id="view-lobby" class="hidden space-y-6">
+            <!-- Incoming Challenge Alert Card (Appears when challenged) -->
+            <div id="incoming-challenge-card" class="hidden bg-amber-50 border-2 border-amber-400 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="bg-amber-500 text-white p-2.5 rounded-lg font-bold text-lg">!</div>
+                    <div>
+                        <h3 class="font-bold text-slate-900">Incoming Battle Challenge!</h3>
+                        <p class="text-sm text-slate-700">
+                            <span id="challenger-name" class="font-semibold text-amber-900">Classmate</span> has challenged you to a naval match.
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <button id="btn-accept-challenge" class="flex-1 sm:flex-initial px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm transition">
+                        Accept Match
+                    </button>
+                    <button id="btn-decline-challenge" class="flex-1 sm:flex-initial px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg text-sm transition">
+                        Decline
+                    </button>
+                </div>
+            </div>
+
+            <!-- Outgoing Challenge Waiting Card -->
+            <div id="outgoing-challenge-card" class="hidden bg-sky-50 border border-sky-300 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-3 h-3 rounded-full bg-sky-600 animate-ping"></div>
+                    <p class="text-sm text-sky-900">
+                        Waiting for <span id="challenged-target-name" class="font-bold">Classmate</span> to accept your challenge...
+                    </p>
+                </div>
+                <button id="btn-cancel-challenge" class="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold transition">
+                    Cancel Request
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Left/Main Column: Online Classmates -->
+                <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <div>
+                            <h2 class="text-lg font-bold text-slate-900">Classroom Roster</h2>
+                            <p class="text-xs text-slate-500">Challenge an available classmate to begin a match</p>
+                        </div>
+                        <span id="online-count-badge" class="px-2.5 py-1 bg-sky-100 text-sky-800 text-xs font-bold rounded-full">
+                            1 Online
+                        </span>
+                    </div>
+
+                    <div id="players-list" class="divide-y divide-slate-100 max-h-[440px] overflow-y-auto">
+                        <!-- Dynamically populated classmate rows -->
+                        <div class="p-8 text-center text-slate-500 text-sm">
+                            Scanning classroom frequencies for classmates...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Solo Practice & Rules Summary -->
+                <div class="space-y-6">
+                    <!-- Practice vs Bot Card -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                        <div class="flex items-center gap-2 text-slate-900 font-bold text-base mb-2">
+                            <span class="px-2 py-0.5 bg-indigo-100 text-indigo-800 text-xs rounded-md">SOLO</span>
+                            <h3>Practice vs. Tactical Bot</h3>
+                        </div>
+                        <p class="text-xs text-slate-600 leading-relaxed mb-4">
+                            Waiting for a partner or want to test your coordinate strategy? Launch a training simulation against our automated naval computer.
+                        </p>
+                        <button id="btn-start-bot" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-sm shadow-sm transition">
+                            Start Practice Match
+                        </button>
+                    </div>
+
+                    <!-- Quick Coordinate Reference -->
+                    <div class="bg-slate-800 text-slate-200 rounded-xl p-5 shadow-sm">
+                        <h3 class="font-bold text-white text-sm mb-3 uppercase tracking-wider">Fleet Specifications</h3>
+                        <ul class="space-y-2 text-xs">
+                            <li class="flex justify-between border-b border-slate-700 pb-1.5">
+                                <span>Carrier</span>
+                                <span class="font-mono-grid text-sky-300">5 Grid Units</span>
+                            </li>
+                            <li class="flex justify-between border-b border-slate-700 pb-1.5">
+                                <span>Battleship</span>
+                                <span class="font-mono-grid text-sky-300">4 Grid Units</span>
+                            </li>
+                            <li class="flex justify-between border-b border-slate-700 pb-1.5">
+                                <span>Cruiser</span>
+                                <span class="font-mono-grid text-sky-300">3 Grid Units</span>
+                            </li>
+                            <li class="flex justify-between border-b border-slate-700 pb-1.5">
+                                <span>Submarine</span>
+                                <span class="font-mono-grid text-sky-300">3 Grid Units</span>
+                            </li>
+                            <li class="flex justify-between">
+                                <span>Destroyer</span>
+                                <span class="font-mono-grid text-sky-300">2 Grid Units</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 3: ACTIVE GAME ARENA (PLACEMENT & BATTLE) -->
+        <section id="view-game" class="hidden space-y-5">
+            <!-- Top Match Status Bar -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <span id="game-mode-badge" class="px-2.5 py-1 bg-slate-800 text-white text-xs font-bold rounded-md">
+                        MULTIPLAYER
+                    </span>
+                    <div>
+                        <div class="text-xs text-slate-500">Opponent</div>
+                        <div id="opponent-display-name" class="font-bold text-slate-900">Classmate</div>
+                    </div>
+                </div>
+
+                <!-- Dynamic Turn / Phase Indicator -->
+                <div id="turn-banner" class="px-4 py-2 rounded-lg bg-sky-100 text-sky-900 font-bold text-sm text-center">
+                    Phase 1: Deploy Your Fleet
+                </div>
+
+                <button id="btn-forfeit-match" class="px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition">
+                    Leave Match
+                </button>
+            </div>
+
+            <!-- PHASE 1: SHIP PLACEMENT INTERFACE -->
+            <div id="phase-placement" class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <!-- Left Controls: Ship Selector & Actions -->
+                <div class="lg:col-span-5 bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-lg">Deploy Your Fleet</h3>
+                        <p class="text-xs text-slate-600 mt-0.5">
+                            Select a vessel below, choose orientation, and click on your 10×10 grid to position it.
+                        </p>
+                    </div>
+
+                    <!-- Ship Dock List -->
+                    <div id="ship-dock" class="space-y-2">
+                        <!-- Rendered via JS -->
+                    </div>
+
+                    <!-- Orientation & Randomize Controls -->
+                    <div class="grid grid-cols-2 gap-2 pt-2">
+                        <button id="btn-rotate-ship" class="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-lg text-xs border border-slate-300 transition">
+                            Orientation: Horizontal
+                        </button>
+                        <button id="btn-randomize-fleet" class="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-lg text-xs border border-slate-300 transition">
+                            Randomize Fleet
+                        </button>
+                    </div>
+
+                    <button id="btn-clear-fleet" class="w-full py-2 px-3 text-slate-500 hover:text-slate-800 text-xs font-medium underline">
+                        Clear Board & Reset Ships
+                    </button>
+
+                    <div class="pt-3 border-t border-slate-100">
+                        <button 
+                            id="btn-ready-battle" 
+                            disabled
+                            class="w-full py-3 px-4 bg-emerald-600 disabled:bg-slate-300 disabled:cursor-not-allowed hover:bg-emerald-700 text-white font-bold rounded-lg shadow-sm transition text-sm"
+                        >
+                            Ready for Battle
+                        </button>
+                        <p id="waiting-opponent-ready" class="hidden text-center text-xs text-amber-700 font-semibold mt-2">
+                            Fleet locked! Waiting for opponent to finish deploying...
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Right Board: Placement Grid -->
+                <div class="lg:col-span-7 bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                    <div class="text-center mb-3">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Your Tactical Sector (A1 – J10)</span>
+                    </div>
+                    <div id="placement-grid" class="naval-grid"></div>
+                </div>
+            </div>
+
+            <!-- PHASE 2: TURN-BASED COMBAT INTERFACE -->
+            <div id="phase-combat" class="hidden space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Left Grid: Player's Own Fleet -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-5">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold text-slate-900 text-sm sm:text-base">Your Fleet</h3>
+                            <span id="own-ships-remaining" class="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full">
+                                5 Ships Afloat
+                            </span>
+                        </div>
+                        <div id="combat-own-grid" class="naval-grid"></div>
+                    </div>
+
+                    <!-- Right Grid: Enemy Waters (Target Grid) -->
+                    <div id="enemy-board-card" class="bg-white rounded-xl shadow-sm border-2 border-slate-200 p-4 sm:p-5 transition">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold text-slate-900 text-sm sm:text-base">Enemy Waters (Click to Fire)</h3>
+                            <span id="enemy-ships-remaining" class="text-xs font-semibold px-2.5 py-1 bg-sky-100 text-sky-800 rounded-full">
+                                5 Ships Afloat
+                            </span>
+                        </div>
+                        <div id="combat-enemy-grid" class="naval-grid"></div>
+                    </div>
+                </div>
+
+                <!-- Bottom Battle Log -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Tactical Communications Log</h4>
+                    <div id="battle-log" class="h-28 overflow-y-auto bg-slate-50 rounded-lg p-3 border border-slate-200 font-mono-grid text-xs space-y-1 text-slate-700">
+                        <div>&gt; Combat systems online. Awaiting coordinates...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MODAL: GAME OVER / VICTORY SUMMARY -->
+        <div id="modal-gameover" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-40 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl max-w-md w-full p-6 sm:p-8 text-center shadow-xl border border-slate-200">
+                <div id="gameover-icon" class="w-16 h-16 mx-auto rounded-full flex items-center justify-center text-3xl font-bold mb-4 bg-emerald-100 text-emerald-700">
+                    ★
+                </div>
+                <h2 id="gameover-title" class="text-2xl font-extrabold text-slate-900">Victory!</h2>
+                <p id="gameover-subtitle" class="text-sm text-slate-600 mt-2 mb-6">
+                    All enemy vessels have been neutralized.
+                </p>
+                <button id="btn-return-lobby" class="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg shadow-sm transition">
+                    Return to Classroom Lobby
+                </button>
+            </div>
+        </div>
+
+        <!-- MODAL: CUSTOM CONFIRMATION DIALOG (Replaces browser confirm()) -->
+        <div id="modal-confirm" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
+                <h3 id="confirm-title" class="text-lg font-bold text-slate-900">Leave Match?</h3>
+                <p id="confirm-message" class="text-sm text-slate-600 mt-2 mb-5">
+                    Are you sure you want to leave the current game and return to the lobby?
+                </p>
+                <div class="flex justify-end gap-2">
+                    <button id="btn-confirm-cancel" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50">
+                        Stay in Game
+                    </button>
+                    <button id="btn-confirm-ok" class="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700">
+                        Leave Match
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Firebase SDK (Official Google CDN) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, 
+            onSnapshot, collection, query, serverTimestamp 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // =========================================================================
+        // 1. CONFIGURATION & CONSTANTS
+        // =========================================================================
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'fleet-command-classroom';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+        const ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+        const COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        const FLEET_TEMPLATE = [
+            { id: 'carrier', name: 'Carrier', size: 5 },
+            { id: 'battleship', name: 'Battleship', size: 4 },
+            { id: 'cruiser', name: 'Cruiser', size: 3 },
+            { id: 'submarine', name: 'Submarine', size: 3 },
+            { id: 'destroyer', name: 'Destroyer', size: 2 }
+        ];
+
+        // Basic classroom appropriateness word filter list
+        const BLOCKED_TERMS = [
+            'admin', 'teacher', 'moderator', 'system', 'profanity', 'damn', 'hell',
+            'crap', 'stupid', 'idiot', 'dumb', 'suck', 'kill', 'hate', 'butt', 'poop',
+            'fart', 'sex', 'porn', 'nude', 'dick', 'cock', 'pussy', 'shit', 'fuck',
+            'bitch', 'ass', 'bastard', 'slut', 'whore', 'nigger', 'nigga', 'fag', 'retard'
+        ];
+
+        // =========================================================================
+        // 2. APPLICATION STATE
+        // =========================================================================
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let myUsername = '';
+        let isOfflineFallback = false;
+
+        // Listeners for Firestore cleanup
+        let unsubPlayers = null;
+        let unsubChallenges = null;
+        let unsubGame = null;
+        let heartbeatInterval = null;
+
+        // Lobby & Challenge State
+        let activeIncomingChallenge = null;
+        let activeOutgoingChallengeId = null;
+
+        // Active Match State
+        let currentGameId = null;
+        let isBotMatch = false;
+        let myRole = 'p1'; // 'p1' or 'p2'
+        let opponentName = 'Opponent';
+        let gameState = null;
+
+        // Placement Phase Local State
+        let selectedShipId = 'carrier';
+        let isHorizontal = true;
+        let placedShips = []; // Array of { id, name, size, cells: [{r, c}], hits: [] }
+
+        // Bot AI State (for Practice Mode)
+        let botShips = [];
+        let botShotsTaken = new Set();
+        let botTargetQueue = [];
+
+        // =========================================================================
+        // 3. DOM REFERENCES
+        // =========================================================================
+        const views = {
+            login: document.getElementById('view-login'),
+            lobby: document.getElementById('view-lobby'),
+            game: document.getElementById('view-game')
+        };
+
+        // =========================================================================
+        // 4. UTILITY & VALIDATION FUNCTIONS
+        // =========================================================================
+        function showView(viewName) {
+            Object.keys(views).forEach(k => {
+                views[k].classList.toggle('hidden', k !== viewName);
+            });
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const colors = {
+                info: 'bg-slate-800 text-white border-slate-700',
+                success: 'bg-emerald-700 text-white border-emerald-600',
+                warning: 'bg-amber-600 text-white border-amber-500',
+                error: 'bg-red-700 text-white border-red-600'
+            };
+            toast.className = `${colors[type] || colors.info} px-4 py-3 rounded-lg shadow-lg border text-xs font-medium pointer-events-auto transition-opacity duration-300`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function showConfirmModal(title, message, onConfirm) {
+            const modal = document.getElementById('modal-confirm');
+            document.getElementById('confirm-title').textContent = title;
+            document.getElementById('confirm-message').textContent = message;
+            modal.classList.remove('hidden');
+
+            const btnOk = document.getElementById('btn-confirm-ok');
+            const btnCancel = document.getElementById('btn-confirm-cancel');
+
+            const cleanup = () => {
+                modal.classList.add('hidden');
+                btnOk.onclick = null;
+                btnCancel.onclick = null;
+            };
+
+            btnCancel.onclick = cleanup;
+            btnOk.onclick = () => {
+                cleanup();
+                onConfirm();
+            };
+        }
+
+        /**
+         * Validates student username for classroom appropriateness and formatting.
+         */
+        function validateUsername(rawName) {
+            const trimmed = rawName.trim().replace(/\s+/g, ' ');
+            if (trimmed.length < 3 || trimmed.length > 18) {
+                return { valid: false, error: 'Callsign must be between 3 and 18 characters.' };
+            }
+            if (!/^[a-zA-Z0-9_ ]+$/.test(trimmed)) {
+                return { valid: false, error: 'Use only letters, numbers, spaces, or underscores.' };
+            }
+
+            // Normalize leetspeak numbers for profanity check
+            const normalized = trimmed.toLowerCase()
+                .replace(/0/g, 'o')
+                .replace(/1/g, 'i')
+                .replace(/3/g, 'e')
+                .replace(/4/g, 'a')
+                .replace(/5/g, 's')
+                .replace(/7/g, 't')
+                .replace(/[^a-z]/g, '');
+
+            for (const word of BLOCKED_TERMS) {
+                if (normalized.includes(word)) {
+                    return { valid: false, error: 'Please choose a classroom-appropriate callsign.' };
+                }
+            }
+
+            return { valid: true, cleanName: trimmed };
+        }
+
+        function coordLabel(r, c) {
+            return `${ROWS[r]}${c + 1}`;
+        }
+
+        // =========================================================================
+        // 5. FIREBASE INITIALIZATION & AUTHENTICATION
+        // =========================================================================
+        async function initFirebase() {
+            const statusText = document.getElementById('connection-status-text');
+            const statusDot = document.getElementById('connection-dot');
+
+            if (!firebaseConfig) {
+                isOfflineFallback = true;
+                statusText.textContent = 'Practice Mode Ready (Local Classroom Session)';
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+                currentUser = { uid: 'local-' + Math.random().toString(36).substring(2, 9) };
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        statusText.textContent = 'Connected to Classroom Network';
+                        statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+                    }
+                });
+            } catch (err) {
+                console.error('Firebase init error:', err);
+                isOfflineFallback = true;
+                statusText.textContent = 'Offline Practice Mode Active';
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+                currentUser = { uid: 'local-' + Math.random().toString(36).substring(2, 9) };
+            }
+        }
+
+        // =========================================================================
+        // 6. LOBBY PRESENCE & CHALLENGE SYSTEM
+        // =========================================================================
+        async function enterLobby(username) {
+            myUsername = username;
+            document.getElementById('header-username').textContent = myUsername;
+            document.getElementById('user-header-info').classList.remove('hidden');
+            showView('lobby');
+
+            if (isOfflineFallback || !db || !currentUser) {
+                renderOfflineLobby();
+                return;
+            }
+
+            await updateMyPresence('Available', null);
+
+            // Gentle 20-second presence heartbeat (firewall friendly, low traffic)
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (currentUser && myUsername) {
+                    const status = currentGameId ? 'In Game' : 'Available';
+                    updateMyPresence(status, currentGameId);
+                }
+            }, 20000);
+
+            // Clean up presence when tab closes
+            window.addEventListener('beforeunload', () => {
+                if (db && currentUser) {
+                    const playerRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid);
+                    deleteDoc(playerRef).catch(() => {});
+                }
+            });
+
+            subscribeToLobby();
+        }
+
+        async function updateMyPresence(status, gameId = null) {
+            if (isOfflineFallback || !db || !currentUser) return;
+            try {
+                const playerRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid);
+                await setDoc(playerRef, {
+                    uid: currentUser.uid,
+                    username: myUsername,
+                    status: status,
+                    gameId: gameId,
+                    lastSeen: Date.now()
+                }, { merge: true });
+            } catch (e) {
+                console.error('Presence update error:', e);
+            }
+        }
+
+        function renderOfflineLobby() {
+            const list = document.getElementById('players-list');
+            document.getElementById('online-count-badge').textContent = '1 Online (Local)';
+            list.innerHTML = `
+                <div class="p-4 flex items-center justify-between bg-sky-50/50">
+                    <div class="flex items-center gap-3">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        <div>
+                            <div class="font-semibold text-slate-900 text-sm">${myUsername} <span class="text-xs text-sky-700 font-normal">(You)</span></div>
+                            <div class="text-xs text-slate-500">Ready for battle</div>
+                        </div>
+                    </div>
+                    <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-full">Available</span>
+                </div>
+                <div class="p-6 text-center text-xs text-slate-500">
+                    Classroom server sync is currently offline. Use <strong>Practice vs. Tactical Bot</strong> on the right to play immediately!
+                </div>
+            `;
+        }
+
+        function subscribeToLobby() {
+            if (!db || !currentUser) return;
+
+            // 1. Listen to online players
+            if (unsubPlayers) unsubPlayers();
+            const playersCol = collection(db, 'artifacts', appId, 'public', 'data', 'players');
+            unsubPlayers = onSnapshot(query(playersCol), (snapshot) => {
+                const now = Date.now();
+                const players = [];
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    // Filter out stale sessions (> 65 seconds without heartbeat)
+                    if (data && data.username && (now - (data.lastSeen || 0) < 65000)) {
+                        players.push(data);
+                    }
+                });
+
+                // Sort: Available first, then alphabetical
+                players.sort((a, b) => {
+                    if (a.uid === currentUser.uid) return -1;
+                    if (b.uid === currentUser.uid) return 1;
+                    if (a.status === b.status) return a.username.localeCompare(b.username);
+                    return a.status === 'Available' ? -1 : 1;
+                });
+
+                renderPlayersList(players);
+            }, (err) => console.error('Players listener error:', err));
+
+            // 2. Listen to challenges
+            if (unsubChallenges) unsubChallenges();
+            const challengesCol = collection(db, 'artifacts', appId, 'public', 'data', 'challenges');
+            unsubChallenges = onSnapshot(query(challengesCol), (snapshot) => {
+                let incoming = null;
+                let outgoing = null;
+
+                snapshot.forEach(docSnap => {
+                    const c = { id: docSnap.id, ...docSnap.data() };
+                    // Ignore old challenges (> 2 mins)
+                    if (Date.now() - (c.createdAt || 0) > 120000) return;
+
+                    if (c.toUid === currentUser.uid && c.status === 'pending') {
+                        incoming = c;
+                    }
+                    if (c.fromUid === currentUser.uid && (c.status === 'pending' || c.status === 'accepted')) {
+                        outgoing = c;
+                    }
+                });
+
+                handleChallengeUpdates(incoming, outgoing);
+            }, (err) => console.error('Challenges listener error:', err));
+        }
+
+        function renderPlayersList(players) {
+            const list = document.getElementById('players-list');
+            document.getElementById('online-count-badge').textContent = `${players.length} Online`;
+
+            if (players.length === 0) {
+                list.innerHTML = `<div class="p-8 text-center text-sm text-slate-500">No active classmates found.</div>`;
+                return;
+            }
+
+            list.innerHTML = '';
+            players.forEach(player => {
+                const isMe = player.uid === currentUser.uid;
+                const isAvailable = player.status === 'Available';
+
+                const row = document.createElement('div');
+                row.className = `p-4 flex items-center justify-between gap-3 ${isMe ? 'bg-sky-50/50' : 'hover:bg-slate-50'}`;
+
+                const leftInfo = document.createElement('div');
+                leftInfo.className = 'flex items-center gap-3 min-w-0';
+                leftInfo.innerHTML = `
+                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${isAvailable ? 'bg-emerald-500' : 'bg-amber-500'}"></span>
+                    <div class="truncate">
+                        <div class="font-semibold text-slate-900 text-sm truncate">
+                            ${escapeHTML(player.username)} ${isMe ? '<span class="text-xs text-sky-700 font-normal">(You)</span>' : ''}
+                        </div>
+                        <div class="text-xs text-slate-500">${isAvailable ? 'Ready for match' : 'Currently in a battle'}</div>
+                    </div>
+                `;
+
+                const rightAction = document.createElement('div');
+                if (isMe) {
+                    rightAction.innerHTML = `<span class="px-2.5 py-1 bg-slate-200 text-slate-700 text-xs font-semibold rounded-full">You</span>`;
+                } else if (isAvailable) {
+                    const btn = document.createElement('button');
+                    btn.className = 'px-3.5 py-2 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 text-white text-xs font-semibold rounded-lg shadow-xs transition';
+                    btn.textContent = 'Challenge';
+                    btn.disabled = Boolean(activeOutgoingChallengeId || currentGameId);
+                    btn.onclick = () => sendChallenge(player);
+                    rightAction.appendChild(btn);
+                } else {
+                    rightAction.innerHTML = `<span class="px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-semibold rounded-full">In Game</span>`;
+                }
+
+                row.appendChild(leftInfo);
+                row.appendChild(rightAction);
+                list.appendChild(row);
+            });
+        }
+
+        function escapeHTML(str) {
+            return str.replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[m]);
+        }
+
+        async function sendChallenge(targetPlayer) {
+            if (!db || !currentUser || activeOutgoingChallengeId) return;
+            try {
+                const challengeId = `${currentUser.uid}_${targetPlayer.uid}_${Date.now()}`;
+                const challengeRef = doc(db, 'artifacts', appId, 'public', 'data', 'challenges', challengeId);
+                await setDoc(challengeRef, {
+                    fromUid: currentUser.uid,
+                    fromName: myUsername,
+                    toUid: targetPlayer.uid,
+                    toName: targetPlayer.username,
+                    status: 'pending',
+                    gameId: null,
+                    createdAt: Date.now()
+                });
+                activeOutgoingChallengeId = challengeId;
+                showToast(`Challenge sent to ${targetPlayer.username}!`, 'info');
+            } catch (e) {
+                console.error('Send challenge error:', e);
+                showToast('Could not send challenge. Try again.', 'error');
+            }
+        }
+
+        async function handleChallengeUpdates(incoming, outgoing) {
+            const incomingCard = document.getElementById('incoming-challenge-card');
+            const outgoingCard = document.getElementById('outgoing-challenge-card');
+
+            // Incoming Challenge UI
+            if (incoming && !currentGameId) {
+                activeIncomingChallenge = incoming;
+                document.getElementById('challenger-name').textContent = incoming.fromName;
+                incomingCard.classList.remove('hidden');
+            } else {
+                activeIncomingChallenge = null;
+                incomingCard.classList.add('hidden');
+            }
+
+            // Outgoing Challenge UI
+            if (outgoing) {
+                activeOutgoingChallengeId = outgoing.id;
+                if (outgoing.status === 'accepted' && outgoing.gameId && !currentGameId) {
+                    // Opponent accepted! Join the created game
+                    outgoingCard.classList.add('hidden');
+                    activeOutgoingChallengeId = null;
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'challenges', outgoing.id)).catch(() => {});
+                    joinMultiplayerGame(outgoing.gameId, 'p1', outgoing.toName);
+                } else if (outgoing.status === 'pending') {
+                    document.getElementById('challenged-target-name').textContent = outgoing.toName;
+                    outgoingCard.classList.remove('hidden');
+                }
+            } else {
+                activeOutgoingChallengeId = null;
+                outgoingCard.classList.add('hidden');
+            }
+        }
+
+        document.getElementById('btn-accept-challenge').onclick = async () => {
+            if (!activeIncomingChallenge || !db || !currentUser) return;
+            const challenge = activeIncomingChallenge;
+            try {
+                const newGameId = `game_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', newGameId);
+
+                await setDoc(gameRef, {
+                    p1Uid: challenge.fromUid,
+                    p1Name: challenge.fromName,
+                    p2Uid: currentUser.uid,
+                    p2Name: myUsername,
+                    phase: 'placement',
+                    turn: 'p1',
+                    p1Ready: false,
+                    p2Ready: false,
+                    p1Ships: '[]',
+                    p2Ships: '[]',
+                    p1Shots: '[]', // shots fired BY p1 AT p2
+                    p2Shots: '[]', // shots fired BY p2 AT p1
+                    winner: null,
+                    lastLog: 'Both fleets entering sector. Deploy your ships!',
+                    updatedAt: Date.now()
+                });
+
+                const challengeRef = doc(db, 'artifacts', appId, 'public', 'data', 'challenges', challenge.id);
+                await updateDoc(challengeRef, {
+                    status: 'accepted',
+                    gameId: newGameId
+                });
+
+                joinMultiplayerGame(newGameId, 'p2', challenge.fromName);
+            } catch (e) {
+                console.error('Accept challenge error:', e);
+                showToast('Failed to start match.', 'error');
+            }
+        };
+
+        document.getElementById('btn-decline-challenge').onclick = async () => {
+            if (!activeIncomingChallenge || !db) return;
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'challenges', activeIncomingChallenge.id));
+                activeIncomingChallenge = null;
+                document.getElementById('incoming-challenge-card').classList.add('hidden');
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        document.getElementById('btn-cancel-challenge').onclick = async () => {
+            if (!activeOutgoingChallengeId || !db) return;
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'challenges', activeOutgoingChallengeId));
+                activeOutgoingChallengeId = null;
+                document.getElementById('outgoing-challenge-card').classList.add('hidden');
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        // =========================================================================
+        // 7. GAME SETUP & SHIP PLACEMENT PHASE
+        // =========================================================================
+        function initPlacementPhase() {
+            placedShips = [];
+            selectedShipId = 'carrier';
+            isHorizontal = true;
+
+            document.getElementById('phase-placement').classList.remove('hidden');
+            document.getElementById('phase-combat').classList.add('hidden');
+            document.getElementById('waiting-opponent-ready').classList.add('hidden');
+            document.getElementById('btn-ready-battle').disabled = true;
+            document.getElementById('btn-ready-battle').classList.remove('hidden');
+            document.getElementById('btn-rotate-ship').textContent = 'Orientation: Horizontal';
+
+            const turnBanner = document.getElementById('turn-banner');
+            turnBanner.textContent = 'Phase 1: Deploy Your Fleet';
+            turnBanner.className = 'px-4 py-2 rounded-lg bg-sky-100 text-sky-900 font-bold text-sm text-center';
+
+            renderShipDock();
+            renderPlacementGrid();
+        }
+
+        function renderShipDock() {
+            const dock = document.getElementById('ship-dock');
+            dock.innerHTML = '';
+
+            FLEET_TEMPLATE.forEach(ship => {
+                const isPlaced = placedShips.some(s => s.id === ship.id);
+                const isSelected = selectedShipId === ship.id && !isPlaced;
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `w-full p-2.5 rounded-lg border text-left flex items-center justify-between transition ${
+                    isPlaced 
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                        : isSelected 
+                            ? 'bg-sky-50 border-sky-500 ring-1 ring-sky-500 text-slate-900' 
+                            : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                }`;
+
+                // Visual pips for ship size
+                let pips = '';
+                for (let i = 0; i < ship.size; i++) {
+                    pips += `<span class="inline-block w-3 h-3 rounded-xs ${isPlaced ? 'bg-emerald-600' : 'bg-slate-600'}"></span>`;
+                }
+
+                btn.innerHTML = `
+                    <div>
+                        <div class="text-xs font-bold">${ship.name}</div>
+                        <div class="text-[11px] text-slate-500">${isPlaced ? 'Deployed (Click to reposition)' : `${ship.size} cells`}</div>
+                    </div>
+                    <div class="flex gap-1">${pips}</div>
+                `;
+
+                btn.onclick = () => {
+                    // If already placed, remove it so student can re-place it
+                    if (isPlaced) {
+                        placedShips = placedShips.filter(s => s.id !== ship.id);
+                        document.getElementById('btn-ready-battle').disabled = true;
+                    }
+                    selectedShipId = ship.id;
+                    renderShipDock();
+                    renderPlacementGrid();
+                };
+
+                dock.appendChild(btn);
+            });
+        }
+
+        function computeShipCells(startR, startC, size, horizontal) {
+            const cells = [];
+            for (let i = 0; i < size; i++) {
+                const r = horizontal ? startR : startR + i;
+                const c = horizontal ? startC + i : startC;
+                cells.push({ r, c });
+            }
+            return cells;
+        }
+
+        function isValidPlacement(cells, ignoreShipId = null) {
+            for (const cell of cells) {
+                if (cell.r < 0 || cell.r >= 10 || cell.c < 0 || cell.c >= 10) return false;
+                for (const ship of placedShips) {
+                    if (ship.id === ignoreShipId) continue;
+                    if (ship.cells.some(sc => sc.r === cell.r && sc.c === cell.c)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function renderPlacementGrid() {
+            const grid = document.getElementById('placement-grid');
+            grid.innerHTML = '';
+
+            // Top-left empty corner
+            const corner = document.createElement('div');
+            corner.className = 'grid-header';
+            grid.appendChild(corner);
+
+            // Column Headers 1-10
+            COLS.forEach(col => {
+                const h = document.createElement('div');
+                h.className = 'grid-header font-mono-grid';
+                h.textContent = col;
+                grid.appendChild(h);
+            });
+
+            // Rows A-J
+            for (let r = 0; r < 10; r++) {
+                const rowHeader = document.createElement('div');
+                rowHeader.className = 'grid-header font-mono-grid';
+                rowHeader.textContent = ROWS[r];
+                grid.appendChild(rowHeader);
+
+                for (let c = 0; c < 10; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell';
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+
+                    const occupied = placedShips.some(s => s.cells.some(sc => sc.r === r && sc.c === c));
+                    if (occupied) cell.classList.add('cell-ship');
+
+                    // Hover preview
+                    cell.addEventListener('mouseenter', () => previewShipPlacement(r, c));
+                    cell.addEventListener('mouseleave', clearPlacementPreview);
+                    cell.addEventListener('click', () => placeSelectedShip(r, c));
+
+                    grid.appendChild(cell);
+                }
+            }
+        }
+
+        function previewShipPlacement(r, c) {
+            clearPlacementPreview();
+            if (!selectedShipId) return;
+            const template = FLEET_TEMPLATE.find(s => s.id === selectedShipId);
+            if (!template) return;
+
+            const cells = computeShipCells(r, c, template.size, isHorizontal);
+            const valid = isValidPlacement(cells, selectedShipId);
+
+            cells.forEach(pt => {
+                if (pt.r >= 0 && pt.r < 10 && pt.c >= 0 && pt.c < 10) {
+                    const el = document.querySelector(`#placement-grid .grid-cell[data-r="${pt.r}"][data-c="${pt.c}"]`);
+                    if (el) el.classList.add(valid ? 'cell-preview-valid' : 'cell-preview-invalid');
+                }
+            });
+        }
+
+        function clearPlacementPreview() {
+            document.querySelectorAll('#placement-grid .grid-cell').forEach(el => {
+                el.classList.remove('cell-preview-valid', 'cell-preview-invalid');
+            });
+        }
+
+        function placeSelectedShip(r, c) {
+            if (!selectedShipId) return;
+            const template = FLEET_TEMPLATE.find(s => s.id === selectedShipId);
+            if (!template) return;
+
+            const cells = computeShipCells(r, c, template.size, isHorizontal);
+            if (!isValidPlacement(cells, selectedShipId)) {
+                showToast('Invalid position: Ships cannot overlap or extend off the grid.', 'warning');
+                return;
+            }
+
+            placedShips = placedShips.filter(s => s.id !== selectedShipId);
+            placedShips.push({
+                id: template.id,
+                name: template.name,
+                size: template.size,
+                cells: cells,
+                hits: []
+            });
+
+            // Auto-select next unplaced ship
+            const nextUnplaced = FLEET_TEMPLATE.find(t => !placedShips.some(p => p.id === t.id));
+            selectedShipId = nextUnplaced ? nextUnplaced.id : null;
+
+            document.getElementById('btn-ready-battle').disabled = placedShips.length !== FLEET_TEMPLATE.length;
+            renderShipDock();
+            renderPlacementGrid();
+        }
+
+        function generateRandomFleet() {
+            const fleet = [];
+            for (const template of FLEET_TEMPLATE) {
+                let placed = false;
+                let attempts = 0;
+                while (!placed && attempts < 200) {
+                    attempts++;
+                    const horiz = Math.random() < 0.5;
+                    const r = Math.floor(Math.random() * 10);
+                    const c = Math.floor(Math.random() * 10);
+                    const cells = computeShipCells(r, c, template.size, horiz);
+
+                    let valid = true;
+                    for (const pt of cells) {
+                        if (pt.r < 0 || pt.r >= 10 || pt.c < 0 || pt.c >= 10) {
+                            valid = false;
+                            break;
+                        }
+                        if (fleet.some(s => s.cells.some(sc => sc.r === pt.r && sc.c === pt.c))) {
+                            valid = false;
+                            break;
+                        }
+                    }
+
+                    if (valid) {
+                        fleet.push({
+                            id: template.id,
+                            name: template.name,
+                            size: template.size,
+                            cells: cells,
+                            hits: []
+                        });
+                        placed = true;
+                    }
+                }
+            }
+            return fleet;
+        }
+
+        document.getElementById('btn-rotate-ship').onclick = () => {
+            isHorizontal = !isHorizontal;
+            document.getElementById('btn-rotate-ship').textContent = `Orientation: ${isHorizontal ? 'Horizontal' : 'Vertical'}`;
+        };
+
+        document.getElementById('btn-randomize-fleet').onclick = () => {
+            placedShips = generateRandomFleet();
+            selectedShipId = null;
+            document.getElementById('btn-ready-battle').disabled = false;
+            renderShipDock();
+            renderPlacementGrid();
+        };
+
+        document.getElementById('btn-clear-fleet').onclick = () => {
+            placedShips = [];
+            selectedShipId = 'carrier';
+            document.getElementById('btn-ready-battle').disabled = true;
+            renderShipDock();
+            renderPlacementGrid();
+        };
+
+        document.getElementById('btn-ready-battle').onclick = async () => {
+            if (placedShips.length !== FLEET_TEMPLATE.length) return;
+
+            document.getElementById('btn-ready-battle').classList.add('hidden');
+            document.getElementById('waiting-opponent-ready').classList.remove('hidden');
+
+            if (isBotMatch) {
+                botShips = generateRandomFleet();
+                botShotsTaken = new Set();
+                botTargetQueue = [];
+                gameState = {
+                    phase: 'combat',
+                    turn: 'p1',
+                    p1Ships: placedShips,
+                    p2Ships: botShips,
+                    p1Shots: [],
+                    p2Shots: [],
+                    winner: null,
+                    lastLog: 'Practice combat initiated! Your turn to fire.'
+                };
+                startCombatPhase();
+                return;
+            }
+
+            // Multiplayer Firestore Ready Sync
+            if (!db || !currentGameId) return;
+            try {
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', currentGameId);
+                const snap = await getDoc(gameRef);
+                if (!snap.exists()) return;
+                const data = snap.data();
+
+                const updates = {};
+                if (myRole === 'p1') {
+                    updates.p1Ready = true;
+                    updates.p1Ships = JSON.stringify(placedShips);
+                    if (data.p2Ready) updates.phase = 'combat';
+                } else {
+                    updates.p2Ready = true;
+                    updates.p2Ships = JSON.stringify(placedShips);
+                    if (data.p1Ready) updates.phase = 'combat';
+                }
+                updates.updatedAt = Date.now();
+                await updateDoc(gameRef, updates);
+            } catch (e) {
+                console.error('Ready sync error:', e);
+                showToast('Error confirming readiness.', 'error');
+            }
+        };
+
+        // =========================================================================
+        // 8. MULTIPLAYER & BOT MATCH FLOW
+        // =========================================================================
+        function joinMultiplayerGame(gameId, role, oppName) {
+            currentGameId = gameId;
+            isBotMatch = false;
+            myRole = role;
+            opponentName = oppName;
+
+            document.getElementById('game-mode-badge').textContent = 'LIVE MATCH';
+            document.getElementById('opponent-display-name').textContent = opponentName;
+
+            updateMyPresence('In Game', gameId);
+            showView('game');
+            initPlacementPhase();
+
+            if (unsubGame) unsubGame();
+            const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
+            unsubGame = onSnapshot(gameRef, (docSnap) => {
+                if (!docSnap.exists()) {
+                    // Game deleted or opponent left
+                    if (currentGameId) {
+                        showToast('Opponent left the match.', 'warning');
+                        cleanupAndReturnToLobby();
+                    }
+                    return;
+                }
+
+                const raw = docSnap.data();
+                gameState = {
+                    ...raw,
+                    p1Ships: JSON.parse(raw.p1Ships || '[]'),
+                    p2Ships: JSON.parse(raw.p2Ships || '[]'),
+                    p1Shots: JSON.parse(raw.p1Shots || '[]'),
+                    p2Shots: JSON.parse(raw.p2Shots || '[]')
+                };
+
+                if (gameState.phase === 'combat' && document.getElementById('phase-combat').classList.contains('hidden')) {
+                    startCombatPhase();
+                } else if (gameState.phase === 'combat') {
+                    renderCombatBoards();
+                }
+
+                if (gameState.winner) {
+                    handleGameOver(gameState.winner);
+                }
+            }, (err) => console.error('Game snapshot error:', err));
+        }
+
+        document.getElementById('btn-start-bot').onclick = () => {
+            currentGameId = 'bot-practice';
+            isBotMatch = true;
+            myRole = 'p1';
+            opponentName = 'Tactical Bot (AI)';
+
+            document.getElementById('game-mode-badge').textContent = 'PRACTICE VS BOT';
+            document.getElementById('opponent-display-name').textContent = opponentName;
+
+            updateMyPresence('In Game', 'practice');
+            showView('game');
+            initPlacementPhase();
+        };
+
+        // =========================================================================
+        // 9. TURN-BASED COMBAT PHASE
+        // =========================================================================
+        function startCombatPhase() {
+            document.getElementById('phase-placement').classList.add('hidden');
+            document.getElementById('phase-combat').classList.remove('hidden');
+
+            const logBox = document.getElementById('battle-log');
+            logBox.innerHTML = `<div>&gt; Both fleets deployed. Battle stations!</div>`;
+
+            renderCombatBoards();
+        }
+
+        function appendBattleLog(text) {
+            const logBox = document.getElementById('battle-log');
+            const entry = document.createElement('div');
+            entry.textContent = `> ${text}`;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function renderCombatBoards() {
+            if (!gameState) return;
+
+            const isMyTurn = gameState.turn === myRole && !gameState.winner;
+            const turnBanner = document.getElementById('turn-banner');
+            const enemyCard = document.getElementById('enemy-board-card');
+
+            if (gameState.winner) {
+                turnBanner.textContent = 'Match Complete';
+                turnBanner.className = 'px-4 py-2 rounded-lg bg-slate-200 text-slate-800 font-bold text-sm text-center';
+                enemyCard.classList.remove('active-turn-ring', 'border-sky-500');
+            } else if (isMyTurn) {
+                turnBanner.textContent = 'YOUR TURN — Select Coordinates in Enemy Waters';
+                turnBanner.className = 'px-4 py-2 rounded-lg bg-emerald-100 text-emerald-900 font-bold text-sm text-center';
+                enemyCard.classList.add('active-turn-ring', 'border-sky-500');
+            } else {
+                turnBanner.textContent = `WAITING — ${opponentName} is aiming...`;
+                turnBanner.className = 'px-4 py-2 rounded-lg bg-amber-100 text-amber-900 font-bold text-sm text-center';
+                enemyCard.classList.remove('active-turn-ring', 'border-sky-500');
+            }
+
+            if (gameState.lastLog) {
+                const logBox = document.getElementById('battle-log');
+                const lastLine = logBox.lastElementChild?.textContent || '';
+                if (!lastLine.includes(gameState.lastLog)) {
+                    appendBattleLog(gameState.lastLog);
+                }
+            }
+
+            const myShips = myRole === 'p1' ? gameState.p1Ships : gameState.p2Ships;
+            const enemyShips = myRole === 'p1' ? gameState.p2Ships : gameState.p1Ships;
+            const shotsAgainstMe = myRole === 'p1' ? gameState.p2Shots : gameState.p1Shots;
+            const myShotsFired = myRole === 'p1' ? gameState.p1Shots : gameState.p2Shots;
+
+            // Count remaining afloat ships
+            const myAfloat = myShips.filter(s => !isShipSunk(s, shotsAgainstMe)).length;
+            const enemyAfloat = enemyShips.filter(s => !isShipSunk(s, myShotsFired)).length;
+
+            document.getElementById('own-ships-remaining').textContent = `${myAfloat} Ships Afloat`;
+            document.getElementById('enemy-ships-remaining').textContent = `${enemyAfloat} Ships Afloat`;
+
+            buildSingleCombatGrid('combat-own-grid', myShips, shotsAgainstMe, true, false);
+            buildSingleCombatGrid('combat-enemy-grid', enemyShips, myShotsFired, false, isMyTurn);
+        }
+
+        function isShipSunk(ship, shotsList) {
+            return ship.cells.every(sc => shotsList.some(shot => shot.r === sc.r && shot.c === sc.c));
+        }
+
+        function buildSingleCombatGrid(elementId, ships, shots, showShips, interactive) {
+            const grid = document.getElementById(elementId);
+            grid.innerHTML = '';
+
+            const corner = document.createElement('div');
+            corner.className = 'grid-header';
+            grid.appendChild(corner);
+
+            COLS.forEach(col => {
+                const h = document.createElement('div');
+                h.className = 'grid-header font-mono-grid';
+                h.textContent = col;
+                grid.appendChild(h);
+            });
+
+            for (let r = 0; r < 10; r++) {
+                const rowHeader = document.createElement('div');
+                rowHeader.className = 'grid-header font-mono-grid';
+                rowHeader.textContent = ROWS[r];
+                grid.appendChild(rowHeader);
+
+                for (let c = 0; c < 10; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell';
+
+                    const shot = shots.find(s => s.r === r && s.c === c);
+                    const shipAtCell = ships.find(s => s.cells.some(sc => sc.r === r && sc.c === c));
+
+                    if (showShips && shipAtCell) {
+                        cell.classList.add('cell-ship');
+                    }
+
+                    if (shot) {
+                        cell.classList.add('disabled-cell');
+                        if (shipAtCell) {
+                            if (isShipSunk(shipAtCell, shots)) {
+                                cell.classList.add('cell-sunk');
+                            } else {
+                                cell.classList.add('cell-hit');
+                            }
+                        } else {
+                            cell.classList.add('cell-miss');
+                        }
+                    } else if (!interactive) {
+                        cell.classList.add('disabled-cell');
+                    } else {
+                        cell.onclick = () => fireShotAt(r, c);
+                    }
+
+                    grid.appendChild(cell);
+                }
+            }
+        }
+
+        async function fireShotAt(r, c) {
+            if (!gameState || gameState.turn !== myRole || gameState.winner) return;
+
+            const myShots = myRole === 'p1' ? [...gameState.p1Shots] : [...gameState.p2Shots];
+            if (myShots.some(s => s.r === r && s.c === c)) return;
+
+            myShots.push({ r, c });
+
+            const enemyShips = myRole === 'p1' ? gameState.p2Ships : gameState.p1Ships;
+            const hitShip = enemyShips.find(s => s.cells.some(sc => sc.r === r && sc.c === c));
+
+            let logMsg = `${myUsername} fired at ${coordLabel(r, c)}: `;
+            if (hitShip) {
+                if (isShipSunk(hitShip, myShots)) {
+                    logMsg += `DIRECT HIT! Enemy ${hitShip.name} SUNK!`;
+                    showToast(`You sank their ${hitShip.name}!`, 'success');
+                } else {
+                    logMsg += `HIT!`;
+                }
+            } else {
+                logMsg += `Miss.`;
+            }
+
+            // Check Victory
+            const allEnemySunk = enemyShips.every(s => isShipSunk(s, myShots));
+            const winnerRole = allEnemySunk ? myRole : null;
+            const nextTurn = myRole === 'p1' ? 'p2' : 'p1';
+
+            if (isBotMatch) {
+                gameState.p1Shots = myShots;
+                gameState.lastLog = logMsg;
+                gameState.turn = nextTurn;
+                gameState.winner = winnerRole;
+                renderCombatBoards();
+
+                if (winnerRole) {
+                    handleGameOver(winnerRole);
+                } else {
+                    setTimeout(executeBotTurn, 750);
+                }
+                return;
+            }
+
+            // Multiplayer Firestore Shot Update
+            if (!db || !currentGameId) return;
+            try {
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', currentGameId);
+                const updates = {
+                    turn: nextTurn,
+                    lastLog: logMsg,
+                    winner: winnerRole,
+                    updatedAt: Date.now()
+                };
+                if (myRole === 'p1') {
+                    updates.p1Shots = JSON.stringify(myShots);
+                } else {
+                    updates.p2Shots = JSON.stringify(myShots);
+                }
+                await updateDoc(gameRef, updates);
+            } catch (e) {
+                console.error('Fire shot error:', e);
+                showToast('Network hiccup firing shot. Please retry.', 'error');
+            }
+        }
+
+        // =========================================================================
+        // 10. PRACTICE BOT AI LOGIC (Target-Hunt Algorithm)
+        // =========================================================================
+        function executeBotTurn() {
+            if (!gameState || gameState.winner || gameState.turn !== 'p2') return;
+
+            let target = null;
+
+            // Pop from smart adjacent target queue if available
+            while (botTargetQueue.length > 0 && !target) {
+                const candidate = botTargetQueue.shift();
+                const key = `${candidate.r},${candidate.c}`;
+                if (candidate.r >= 0 && candidate.r < 10 && candidate.c >= 0 && candidate.c < 10 && !botShotsTaken.has(key)) {
+                    target = candidate;
+                }
+            }
+
+            // Otherwise pick random untargeted cell (checkerboard parity optimization)
+            if (!target) {
+                const available = [];
+                for (let r = 0; r < 10; r++) {
+                    for (let c = 0; c < 10; c++) {
+                        if (!botShotsTaken.has(`${r},${c}`)) {
+                            available.push({ r, c });
+                        }
+                    }
+                }
+                if (available.length > 0) {
+                    target = available[Math.floor(Math.random() * available.length)];
+                }
+            }
+
+            if (!target) return;
+
+            botShotsTaken.add(`${target.r},${target.c}`);
+            gameState.p2Shots.push(target);
+
+            const hitShip = gameState.p1Ships.find(s => s.cells.some(sc => sc.r === target.r && sc.c === target.c));
+            let logMsg = `Tactical Bot fired at ${coordLabel(target.r, target.c)}: `;
+
+            if (hitShip) {
+                if (isShipSunk(hitShip, gameState.p2Shots)) {
+                    logMsg += `HIT! Your ${hitShip.name} was SUNK!`;
+                    botTargetQueue = []; // Clear queue once ship sinks
+                } else {
+                    logMsg += `HIT!`;
+                    // Queue orthogonal neighbors
+                    botTargetQueue.push(
+                        { r: target.r - 1, c: target.c },
+                        { r: target.r + 1, c: target.c },
+                        { r: target.r, c: target.c - 1 },
+                        { r: target.r, c: target.c + 1 }
+                    );
+                }
+            } else {
+                logMsg += `Miss.`;
+            }
+
+            const allPlayerSunk = gameState.p1Ships.every(s => isShipSunk(s, gameState.p2Shots));
+            gameState.lastLog = logMsg;
+            gameState.turn = 'p1';
+            if (allPlayerSunk) {
+                gameState.winner = 'p2';
+            }
+
+            renderCombatBoards();
+            if (gameState.winner) {
+                handleGameOver(gameState.winner);
+            }
+        }
+
+        // =========================================================================
+        // 11. GAME OVER & LOBBY RETURN CLEANUP
+        // =========================================================================
+        function handleGameOver(winnerRole) {
+            const modal = document.getElementById('modal-gameover');
+            const icon = document.getElementById('gameover-icon');
+            const title = document.getElementById('gameover-title');
+            const subtitle = document.getElementById('gameover-subtitle');
+
+            const didWin = winnerRole === myRole;
+            if (didWin) {
+                icon.textContent = '★';
+                icon.className = 'w-16 h-16 mx-auto rounded-full flex items-center justify-center text-3xl font-bold mb-4 bg-emerald-100 text-emerald-700';
+                title.textContent = 'Victory Achieved!';
+                subtitle.textContent = `Outstanding strategy, ${myUsername}! You neutralized ${opponentName}'s entire fleet.`;
+            } else {
+                icon.textContent = '⚓';
+                icon.className = 'w-16 h-16 mx-auto rounded-full flex items-center justify-center text-3xl font-bold mb-4 bg-slate-200 text-slate-700';
+                title.textContent = 'Fleet Defeated';
+                subtitle.textContent = `${opponentName} sank all of your vessels. Review your grid placement and try again!`;
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        async function cleanupAndReturnToLobby() {
+            document.getElementById('modal-gameover').classList.add('hidden');
+
+            if (unsubGame) {
+                unsubGame();
+                unsubGame = null;
+            }
+
+            if (!isBotMatch && db && currentGameId) {
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', currentGameId);
+                deleteDoc(gameRef).catch(() => {});
+            }
+
+            currentGameId = null;
+            isBotMatch = false;
+            gameState = null;
+
+            await updateMyPresence('Available', null);
+            showView('lobby');
+        }
+
+        // =========================================================================
+        // 12. EVENT BINDINGS & STARTUP
+        // =========================================================================
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('input-username').value;
+            const errorBox = document.getElementById('login-error');
+
+            const check = validateUsername(input);
+            if (!check.valid) {
+                errorBox.textContent = check.error;
+                errorBox.classList.remove('hidden');
+                return;
+            }
+
+            errorBox.classList.add('hidden');
+            await enterLobby(check.cleanName);
+        });
+
+        document.getElementById('btn-change-name').onclick = () => {
+            if (currentGameId) {
+                showToast('Finish or leave your current match before changing callsigns.', 'warning');
+                return;
+            }
+            document.getElementById('input-username').value = myUsername;
+            showView('login');
+        };
+
+        document.getElementById('btn-forfeit-match').onclick = () => {
+            showConfirmModal(
+                'Leave Current Match?',
+                'If you leave now, the match will end and you will return to the classroom lobby.',
+                () => cleanupAndReturnToLobby()
+            );
+        };
+
+        document.getElementById('btn-return-lobby').onclick = () => {
+            cleanupAndReturnToLobby();
+        };
+
+        // Boot application on window load
+        window.onload = () => {
+            initFirebase();
+        };
+    </script>
+</body>
+</html>
